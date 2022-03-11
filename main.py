@@ -9,6 +9,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.feature_extraction.text import TfidfVectorizer
+import Levenshtein as lev
+from fuzzywuzzy import fuzz
 
 nltk.download('punkt') # for tokenization
 nltk.download('stopwords')
@@ -79,8 +81,28 @@ def get_features(row, nodes_index, graph):
     source_authors = get_authors(source_info.authors)
     target_authors = get_authors(target_info.authors)
     comm_auth = len(source_authors.intersection(target_authors))
+    
+    
+    lev_title_dist = lev.distance(source_info.title,target_info.title)
+    lev_title_ratio = lev.ratio(source_info.title,target_info.title)
+    lev_desc_dist = lev.distance(source_info.abstract,target_info.abstract)
+    lev_desc_ratio = lev.ratio(source_info.abstract,target_info.abstract)
+    lev_journal_dist = lev.distance(source_info.journal_name,target_info.journal_name)
+    lev_journal_ratio = lev.ratio(source_info.journal_name,target_info.journal_name)
+    fuzz_ratio_t = fuzz.ratio(source_info.title,target_info.title)
+    fuzz_partial_ratio_t = fuzz.partial_ratio(source_info.title,target_info.title)
+    fuzz_token_sort_ratio_t = fuzz.token_sort_ratio(source_info.title,target_info.title)
+    fuzz_token_set_ratio_t = fuzz.token_set_ratio(source_info.title,target_info.title)
+    fuzz_ratio_desc = fuzz.ratio(source_info.abstract,target_info.abstract)
+    fuzz_partial_ratio_desc = fuzz.partial_ratio(source_info.abstract,target_info.abstract)
+    fuzz_token_sort_ratio_desc = fuzz.token_sort_ratio(source_info.abstract,target_info.abstract)
+    fuzz_token_set_ratio_desc = fuzz.token_set_ratio(source_info.abstract,target_info.abstract)
+    fuzz_ratio_j = fuzz.ratio(source_info.journal_name,target_info.journal_name)
+    fuzz_partial_ratio_j = fuzz.partial_ratio(source_info.journal_name,target_info.journal_name)
+    fuzz_token_sort_ratio_j = fuzz.token_sort_ratio(source_info.journal_name,target_info.journal_name)
+    fuzz_token_set_ratio_j = fuzz.token_set_ratio(source_info.journal_name,target_info.journal_name)
 
-    return [overlap_title, temp_diff, comm_auth, jaccard, adamic, corr, pref_attachment]
+    return [overlap_title, temp_diff, comm_auth, jaccard, adamic, corr, pref_attachment, lev_title_dist, lev_title_ratio, lev_desc_dist, lev_desc_ratio,lev_journal_dist,lev_journal_ratio,fuzz_ratio_t,fuzz_partial_ratio_t,fuzz_token_sort_ratio_t,fuzz_token_set_ratio_t,fuzz_ratio_desc,fuzz_partial_ratio_desc,fuzz_token_sort_ratio_desc,fuzz_token_set_ratio_desc,fuzz_ratio_j,fuzz_partial_ratio_j,fuzz_token_sort_ratio_j,fuzz_token_set_ratio_j]
 
 
 def run(X_train, X_test, y_train):
@@ -107,7 +129,7 @@ def run(X_train, X_test, y_train):
         training_features.append(get_features(row, nodes_index, graph))
 
     training_features = np.array(training_features)
-    cols = ['overlap_title', 'temp_diff', 'comm_auth', 'jaccard', 'adamic', 'corr', 'pref_attachment']
+    cols = ['overlap_title', 'temp_diff', 'comm_auth', 'jaccard', 'adamic', 'corr', 'pref_attachment','lev_title_dist', 'lev_title_ratio', 'lev_desc_dist', 'lev_desc_ratio','lev_journal_dist','lev_journal_ratio','fuzz_ratio_t','fuzz_partial_ratio_t','fuzz_token_sort_ratio_t','fuzz_token_set_ratio_t','fuzz_ratio_desc','fuzz_partial_ratio_desc','fuzz_token_sort_ratio_desc','fuzz_token_set_ratio_desc','fuzz_ratio_j','fuzz_partial_ratio_j','fuzz_token_sort_ratio_j','fuzz_token_set_ratio_j']
 
     X_train[cols] = training_features
     X_train = X_train[cols]
