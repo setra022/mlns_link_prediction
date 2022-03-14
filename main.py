@@ -4,6 +4,7 @@ import csv
 import nltk
 import igraph
 from tqdm import tqdm
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.svm import LinearSVC
@@ -67,6 +68,8 @@ def get_features(row, nodes_index, graph):
     common = source_neighbors.intersection(target_neighbors)
     union = source_neighbors.union(target_neighbors)
     jaccard = len(common) / len(union) if len(union) > 0 else 0
+    cosine = len(common) / pref_attachment if pref_attachment > 0 else 0
+
 
     adamic = sum([1 / np.log(graph.vs[node].degree()) for node in common])
     source_info = node_info.loc[row.source]
@@ -148,7 +151,8 @@ def run(X_train, X_test, y_train):
 
     X_test = scaler.transform(X_test)
 
-    model = LinearSVC()
+    model=RandomForestClassifier(n_estimators = 300, class_weight = 'balanced')
+    #model = LinearSVC()
     print("Model fitting...")
     model.fit(X_train, y_train)
     print("Fitting done.")
