@@ -1,6 +1,10 @@
 import numpy as np
 import pandas as pd
+import scipy
 import csv
+import json
+import pickle
+import os
 import nltk
 import igraph
 from tqdm import tqdm
@@ -10,8 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.feature_extraction.text import TfidfVectorizer
-import Levenshtein as lev
-from fuzzywuzzy import fuzz
+
 
 nltk.download('punkt') # for tokenization
 nltk.download('stopwords')
@@ -23,6 +26,19 @@ node_info.columns = ['id', 'year', 'title', 'authors', 'journal_name', 'abstract
 node_info.fillna('', inplace=True)
 node_info.set_index('id', inplace=True)
 
+print("Loading training set...")
+training_set = pd.read_csv("training_set.txt", sep=' ', header=None)
+training_set.columns = ['source', 'target', 'edge']
+
+print("Loading testing set...")
+testing_set = pd.read_csv("testing_set.txt", sep=' ', header=None)
+testing_set.columns = ['source', 'target']
+
+print("Loading text features...")
+with open('./resource/text_features.json') as json_file:
+    text_features_dic = json.load(json_file)
+
+print("Vectorizing corpus...")
 corpus = node_info.abstract
 vectorizer = TfidfVectorizer(stop_words="english")
 features_TFIDF = vectorizer.fit_transform(corpus)
@@ -41,7 +57,7 @@ def get_authors(authors):
 def find_node(graph, nodes_index, name):
     return graph.vs[nodes_index[name]]
 
-def get_features(row, nodes_index, graph):
+def get_features(row, nodes_index, graph, katz):
     source_node = find_node(graph, nodes_index, row.source)
     target_node = find_node(graph, nodes_index, row.target)
 
@@ -51,6 +67,8 @@ def get_features(row, nodes_index, graph):
     u2 = features_TFIDF[target_node.index]
 
     corr = np.dot(u1, u2.T).toarray()[0, 0]
+
+    katz_measure = katz[source_node.index, target_node.index]
 
     # len_shortest_path = len(shortest_paths[0])
     # import pdb;pdb.set_trace()
@@ -70,7 +88,6 @@ def get_features(row, nodes_index, graph):
     jaccard = len(common) / len(union) if len(union) > 0 else 0
     cosine = len(common) / pref_attachment if pref_attachment > 0 else 0
 
-
     adamic = sum([1 / np.log(graph.vs[node].degree()) for node in common])
     source_info = node_info.loc[row.source]
     target_info = node_info.loc[row.target]
@@ -85,30 +102,32 @@ def get_features(row, nodes_index, graph):
     target_authors = get_authors(target_info.authors)
     comm_auth = len(source_authors.intersection(target_authors))
     
-    
-    lev_title_dist = lev.distance(source_info.title,target_info.title)
-    lev_title_ratio = lev.ratio(source_info.title,target_info.title)
-    lev_desc_dist = lev.distance(source_info.abstract,target_info.abstract)
-    lev_desc_ratio = lev.ratio(source_info.abstract,target_info.abstract)
-    lev_journal_dist = lev.distance(source_info.journal_name,target_info.journal_name)
-    lev_journal_ratio = lev.ratio(source_info.journal_name,target_info.journal_name)
-    fuzz_ratio_t = fuzz.ratio(source_info.title,target_info.title)
-    fuzz_partial_ratio_t = fuzz.partial_ratio(source_info.title,target_info.title)
-    fuzz_token_sort_ratio_t = fuzz.token_sort_ratio(source_info.title,target_info.title)
-    fuzz_token_set_ratio_t = fuzz.token_set_ratio(source_info.title,target_info.title)
-    fuzz_ratio_desc = fuzz.ratio(source_info.abstract,target_info.abstract)
-    fuzz_partial_ratio_desc = fuzz.partial_ratio(source_info.abstract,target_info.abstract)
-    fuzz_token_sort_ratio_desc = fuzz.token_sort_ratio(source_info.abstract,target_info.abstract)
-    fuzz_token_set_ratio_desc = fuzz.token_set_ratio(source_info.abstract,target_info.abstract)
-    fuzz_ratio_j = fuzz.ratio(source_info.journal_name,target_info.journal_name)
-    fuzz_partial_ratio_j = fuzz.partial_ratio(source_info.journal_name,target_info.journal_name)
-    fuzz_token_sort_ratio_j = fuzz.token_sort_ratio(source_info.journal_name,target_info.journal_name)
-    fuzz_token_set_ratio_j = fuzz.token_set_ratio(source_info.journal_name,target_info.journal_name)
+    text_features = text_features_dic[str(row.source)][str(row.target)]
 
-    return [overlap_title, temp_diff, comm_auth, jaccard, adamic, corr, pref_attachment, lev_title_dist, lev_title_ratio, lev_desc_dist, lev_desc_ratio,lev_journal_dist,lev_journal_ratio,fuzz_ratio_t,fuzz_partial_ratio_t,fuzz_token_sort_ratio_t,fuzz_token_set_ratio_t,fuzz_ratio_desc,fuzz_partial_ratio_desc,fuzz_token_sort_ratio_desc,fuzz_token_set_ratio_desc,fuzz_ratio_j,fuzz_partial_ratio_j,fuzz_token_sort_ratio_j,fuzz_token_set_ratio_j]
+    return [overlap_title, temp_diff, comm_auth, jaccard, adamic, corr, pref_attachment, cosine, katz_measure] + text_features
+
+def get_katz_matrix(graph, beta, depth):
+    print("Computing Katz matrix...")
+    adj = graph.get_adjacency_sparse()
+    # adj = (adj + adj.transpose()) / 2
+    b_adj = beta * adj
+    product = b_adj.dot(b_adj)
+    katz = scipy.sparse.csr_matrix((len(node_info), len(node_info)))
+    for _ in range(depth):
+        katz += product
+        product = product.dot(b_adj)
+    return katz
+
+def load_data(data_path):
+    with open(data_path, 'rb') as handle:
+        return pickle.load(handle)
+
+def save_data(data_path, data):
+    with open(data_path, 'wb') as handle:
+        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def run(X_train, X_test, y_train):
+def add_features(X_train, X_test):
     graph = igraph.Graph(directed=True)
     nodes = list(node_info.index)
     graph.add_vertices(nodes)
@@ -127,31 +146,30 @@ def run(X_train, X_test, y_train):
 
     graph.add_edges(edges)
 
+    katz = get_katz_matrix(graph, 0.5, 5)
+
     training_features = []
     for _, row in tqdm(list(X_train.iterrows()), desc="Computing training features..."):
-        training_features.append(get_features(row, nodes_index, graph))
+        training_features.append(get_features(row, nodes_index, graph, katz))
 
-    training_features = np.array(training_features)
-    cols = ['overlap_title', 'temp_diff', 'comm_auth', 'jaccard', 'adamic', 'corr', 'pref_attachment','lev_title_dist', 'lev_title_ratio', 'lev_desc_dist', 'lev_desc_ratio','lev_journal_dist','lev_journal_ratio','fuzz_ratio_t','fuzz_partial_ratio_t','fuzz_token_sort_ratio_t','fuzz_token_set_ratio_t','fuzz_ratio_desc','fuzz_partial_ratio_desc','fuzz_token_sort_ratio_desc','fuzz_token_set_ratio_desc','fuzz_ratio_j','fuzz_partial_ratio_j','fuzz_token_sort_ratio_j','fuzz_token_set_ratio_j']
-
-    X_train[cols] = training_features
-    X_train = X_train[cols]
+    X_train = np.array(training_features)
 
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
 
     val_features = []
     for _, row in tqdm(list(X_test.iterrows()), desc="Computing validation features..."):
-        val_features.append(get_features(row, nodes_index, graph))
+        val_features.append(get_features(row, nodes_index, graph, katz))
 
-    val_features = np.array(val_features)
-
-    X_test[cols] = val_features
-    X_test = X_test[cols]
+    X_test = np.array(val_features)
 
     X_test = scaler.transform(X_test)
 
-    model=RandomForestClassifier(n_estimators = 300, class_weight = 'balanced')
+    return X_train, X_test
+
+def run(X_train, X_test, y_train, data_path=None):
+
+    model = RandomForestClassifier(n_estimators = 100, class_weight = 'balanced')
     #model = LinearSVC()
     print("Model fitting...")
     model.fit(X_train, y_train)
@@ -162,36 +180,35 @@ def run(X_train, X_test, y_train):
     return y_pred
 
 
-training_set = pd.read_csv("training_set.txt", sep=' ', header=None)
-training_set.columns = ['source', 'target', 'edge']
-
-testing_set = pd.read_csv("testing_set.txt", sep=' ', header=None)
-testing_set.columns = ['source', 'target']
-
-
-validate_model = False
+validate_model = True
+data_path = "./data2.pickle"
 
 if validate_model:
 
-    # N_samples = 100000
+    # N_samples = 10000
     # training_set = training_set[:N_samples]
 
     X = training_set[['source', 'target']]
     y = training_set['edge']
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.25)
+    if data_path is not None and os.path.exists(data_path):
+        X_train, X_val, y_train, y_val = load_data(data_path)
+    else:
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.1)
+        X_train, X_val = add_features(X_train, X_val)
+        filepath = data_path or "./data.pickle"
+        save_data(filepath, (X_train, X_val, y_train, y_val))
 
-    y_pred = run(X_train, X_val, y_train)
+    y_pred = run(X_train, X_val, y_train, data_path=data_path)
 
     accuracy = accuracy_score(y_val, y_pred)
     precision = precision_score(y_val, y_pred)
     recall = recall_score(y_val, y_pred)
     f1 = f1_score(y_val, y_pred)
 
-    print(f'Accuracy : {accuracy:.2f}')
-    print(f'Precision : {precision:.2f}')
-    print(f'Recall : {recall:.2f}')
-    print(f'F1-Score : {f1:.2f}')
-    import pdb;pdb.set_trace()
+    print(f'Accuracy : {accuracy:.4f}')
+    print(f'Precision : {precision:.4f}')
+    print(f'Recall : {recall:.4f}')
+    print(f'F1-Score : {f1:.4f}')
 
     print("Done.")
 
@@ -205,5 +222,6 @@ else:
 
     with open("test_predictions.csv", "w") as pred1:
         csv_out = csv.writer(pred1)
+        csv_out.writerow(["id", "category"])
         for row in y_pred:
             csv_out.writerow(row)
