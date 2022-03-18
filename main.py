@@ -9,6 +9,7 @@ import nltk
 import igraph
 from tqdm import tqdm
 from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.svm import LinearSVC
@@ -169,10 +170,12 @@ def add_features(X_train, X_test):
 
 def run(X_train, X_test, y_train, data_path=None):
 
-    model = RandomForestClassifier(n_estimators = 100, class_weight = 'balanced')
+    #model = RandomForestClassifier(n_estimators = 100, class_weight = 'balanced')
     #model = LinearSVC()
+    model = XGBClassifier(use_label_encoder=False, eval_metric='mlogloss')
     print("Model fitting...")
     model.fit(X_train, y_train)
+    # import pdb;pdb.set_trace()
     print("Fitting done.")
 
     y_pred = model.predict(X_test)
@@ -180,8 +183,8 @@ def run(X_train, X_test, y_train, data_path=None):
     return y_pred
 
 
-validate_model = True
-data_path = "./data2.pickle"
+validate_model = False
+data_path = None
 
 if validate_model:
 
@@ -213,10 +216,13 @@ if validate_model:
     print("Done.")
 
 else:
-    X = training_set[['source', 'target']]
-    y = training_set['edge']
+    X_train = training_set[['source', 'target']]
+    X_test = testing_set
+    y_train = training_set['edge']
 
-    y_pred = run(X, testing_set, y)
+    X_train, X_test = add_features(X_train, X_test)
+
+    y_pred = run(X_train, X_test, y_train)
 
     y_pred = zip(range(len(testing_set)), y_pred)
 
